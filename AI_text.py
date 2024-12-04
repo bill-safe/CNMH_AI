@@ -1,18 +1,19 @@
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
-import numpy as np
-from sklearn.model_selection import KFold
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-import matplotlib.pyplot as plt
-from typing import List, Tuple
-import copy
-import pandas as pd
-import os
-from torch.optim.lr_scheduler import OneCycleLR
-from scipy.signal import savgol_filter
-from sklearn.preprocessing import StandardScaler
+# 导入必要的库
+import torch  # PyTorch深度学习框架
+import torch.nn as nn  # 神经网络模块
+import torch.optim as optim  # 优化器
+from torch.utils.data import Dataset, DataLoader  # 数据加载工具
+import numpy as np  # 数值计算库
+from sklearn.model_selection import KFold  # K折交叉验证
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score  # 评估指标
+import matplotlib.pyplot as plt  # 绘图库
+from typing import List, Tuple  # 类型注解
+import copy  # 深拷贝
+import pandas as pd  # 数据处理库
+import os  # 操作系统接口
+from torch.optim.lr_scheduler import OneCycleLR  # 学习率调度器
+from scipy.signal import savgol_filter  # 信号平滑滤波
+from sklearn.preprocessing import StandardScaler  # 数据标准化
 
 def load_data(data_dir: str) -> Tuple[np.ndarray, np.ndarray]:
     """
@@ -25,6 +26,7 @@ def load_data(data_dir: str) -> Tuple[np.ndarray, np.ndarray]:
         X: 形状为(N, 1, sequence_length)的特征数据
         y: 形状为(N,)的标签数据
     """
+    # 定义类别到标签的映射字典
     class_to_label = {
         'APCK': 0,
         'FRCK': 1,
@@ -32,13 +34,11 @@ def load_data(data_dir: str) -> Tuple[np.ndarray, np.ndarray]:
         'RHCK': 3
     }
     
-    all_features = []
-    all_labels = []
+    all_features = []  # 存储所有特征
+    all_labels = []    # 存储所有标签
+    all_raw_features = []  # 存储原始特征用于标准化
     
-    # 收集所有特征用于标准化
-    all_raw_features = []
-    
-    # 第一次遍历：收集所有特征
+    # 第一次遍历：收集所有特征用于标准化
     for filename in os.listdir(data_dir):
         if not filename.endswith('.CSV'):
             continue
@@ -48,8 +48,8 @@ def load_data(data_dir: str) -> Tuple[np.ndarray, np.ndarray]:
             continue
             
         filepath = os.path.join(data_dir, filename)
-        df = pd.read_csv(filepath, skiprows=1)
-        features = df['Y(Counts)'].values
+        df = pd.read_csv(filepath, skiprows=1)  # 跳过第一行
+        features = df['Y(Counts)'].values  # 提取Y轴计数值
         all_raw_features.append(features)
     
     # 创建并拟合标准化器
@@ -68,10 +68,10 @@ def load_data(data_dir: str) -> Tuple[np.ndarray, np.ndarray]:
         filepath = os.path.join(data_dir, filename)
         df = pd.read_csv(filepath, skiprows=1)
         
-        # 使用Savitzky-Golay滤波进行平滑处理
+        # 使用Savitzky-Golay滤波进行平滑处理，减少噪声
         features = savgol_filter(df['Y(Counts)'].values, window_length=11, polyorder=3)
         
-        # 标准化
+        # 标准化特征
         features = scaler.transform(features.reshape(-1, 1)).ravel()
         
         all_features.append(features)
@@ -80,27 +80,52 @@ def load_data(data_dir: str) -> Tuple[np.ndarray, np.ndarray]:
     X = np.array(all_features)
     y = np.array(all_labels)
     
+    # 添加通道维度，转换为(N, 1, sequence_length)的形状
     X = X[:, np.newaxis, :]
     
     return X, y
 
 class ChromatographyDataset(Dataset):
+    """
+    色谱图数据集类，用于加载和预处理数据
+    """
     def __init__(self, X: np.ndarray, y: np.ndarray, augment: bool = False):
-        self.X = torch.FloatTensor(X)
+        """
+        初始化数据集
+        
+        Args:
+            X: 特征数据
+            y: 标签数据
+            augment: 是否进行数据增强
+        """
+        self.X = torch.FloatTensor(X)  # 转换为PyTorch张量
         self.y = torch.LongTensor(y)
         self.augment = augment
     
     def __len__(self):
+        """返回数据集大小"""
         return len(self.y)
     
     def __getitem__(self, idx):
+        """
+        获取单个数据样本
+        
+        Args:
+            idx: 索引
+            
+        Returns:
+            (x, y): 特征和标签对
+        """
         x = self.X[idx].clone()
         y = self.y[idx]
         
+        # 数据增强：添加随机噪声和随机移位
         if self.augment and np.random.random() > 0.5:
+            # 添加高斯噪声
             noise = torch.randn_like(x) * 0.002
             x = x + noise
             
+            # 随机移位
             shift = np.random.randint(-3, 4)
             if shift > 0:
                 x = torch.cat([x[:, shift:], x[:, :shift]], dim=1)
@@ -110,58 +135,93 @@ class ChromatographyDataset(Dataset):
         return x, y
 
 class BasicBlock1D(nn.Module):
+    """
+    一维ResNet的基本块
+    """
     expansion = 1
 
     def __init__(self, inplanes, planes, stride=1, downsample=None, dropout_rate=0.1):
+        """
+        初始化基本块
+        
+        Args:
+            inplanes: 输入通道数
+            planes: 输出通道数
+            stride: 卷积步长
+            downsample: 下采样层
+            dropout_rate: dropout比率
+        """
         super(BasicBlock1D, self).__init__()
+        # 第一个卷积层
         self.conv1 = nn.Conv1d(inplanes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm1d(planes)
-        self.relu = nn.ReLU(inplace=True)
-        self.dropout = nn.Dropout(p=dropout_rate)
+        self.bn1 = nn.BatchNorm1d(planes)  # 批归一化
+        self.relu = nn.ReLU(inplace=True)  # ReLU激活
+        self.dropout = nn.Dropout(p=dropout_rate)  # Dropout正则化
+        # 第二个卷积层
         self.conv2 = nn.Conv1d(planes, planes, kernel_size=3, padding=1, bias=False)
         self.bn2 = nn.BatchNorm1d(planes)
         self.downsample = downsample
         self.stride = stride
 
     def forward(self, x):
-        identity = x
+        """前向传播"""
+        identity = x  # 保存输入用于残差连接
 
+        # 第一个卷积块
         out = self.conv1(x)
         out = self.bn1(out)
         out = self.relu(out)
         out = self.dropout(out)
 
+        # 第二个卷积块
         out = self.conv2(out)
         out = self.bn2(out)
 
+        # 残差连接
         if self.downsample is not None:
             identity = self.downsample(x)
 
-        out += identity
+        out += identity  # 添加残差连接
         out = self.relu(out)
 
         return out
 
 class ResNet1D(nn.Module):
+    """
+    一维ResNet模型
+    """
     def __init__(self, block, layers, num_classes=4, dropout_rate=0.1):
+        """
+        初始化ResNet模型
+        
+        Args:
+            block: 基本块类型
+            layers: 每层的基本块数量
+            num_classes: 分类数量
+            dropout_rate: dropout比率
+        """
         super(ResNet1D, self).__init__()
-        self.inplanes = 32  
+        self.inplanes = 32
         self.dropout_rate = dropout_rate
         
+        # 初始卷积层
         self.conv1 = nn.Conv1d(1, 32, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = nn.BatchNorm1d(32)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool1d(kernel_size=3, stride=2, padding=1)
         self.dropout = nn.Dropout(p=dropout_rate)
         
+        # 残差层
         self.layer1 = self._make_layer(block, 32, layers[0])
         self.layer2 = self._make_layer(block, 64, layers[1], stride=2)
         self.layer3 = self._make_layer(block, 128, layers[2], stride=2)
         self.layer4 = self._make_layer(block, 256, layers[3], stride=2)
         
+        # 全局平均池化和全连接层
         self.avgpool = nn.AdaptiveAvgPool1d(1)
         self.fc = nn.Linear(256 * block.expansion, num_classes)
 
+        # 初始化权重
         for m in self.modules():
             if isinstance(m, nn.Conv1d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -170,6 +230,15 @@ class ResNet1D(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def _make_layer(self, block, planes, blocks, stride=1):
+        """
+        创建残差层
+        
+        Args:
+            block: 基本块类型
+            planes: 输出通道数
+            blocks: 基本块数量
+            stride: 步长
+        """
         downsample = None
         if stride != 1 or self.inplanes != planes * block.expansion:
             downsample = nn.Sequential(
@@ -186,16 +255,20 @@ class ResNet1D(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
+        """前向传播"""
+        # 初始层
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
         x = self.maxpool(x)
 
+        # 残差层
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.layer4(x)
 
+        # 分类层
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
         x = self.dropout(x)
@@ -204,13 +277,23 @@ class ResNet1D(nn.Module):
         return x
 
 class EarlyStopping:
-    def __init__(self, patience=15, min_delta=0.0005, min_epochs=15, save_dir='models'):
+    """
+    早停类，用于防止过拟合
+    """
+    def __init__(self, patience=10, min_delta=0.001, save_dir='models'):
+        """
+        初始化早停器
+        
+        Args:
+            patience: 容忍的轮数
+            min_delta: 最小改善阈值
+            save_dir: 模型保存目录
+        """
         self.patience = patience
         self.min_delta = min_delta
-        self.min_epochs = min_epochs  # 最小训练轮数
         self.counter = 0
-        self.best_loss = float('inf')  # 初始化为无穷大
-        self.best_f1 = 0  # 初始化为0
+        self.best_loss = None
+        self.best_f1 = None
         self.early_stop = False
         self.best_model = None
         self.best_epoch = 0
@@ -223,24 +306,33 @@ class EarlyStopping:
             os.makedirs(save_dir)
 
     def __call__(self, val_loss, val_metrics, model, epoch, fold=None):
+        """
+        检查是否应该早停
+        
+        Args:
+            val_loss: 验证损失
+            val_metrics: 验证指标
+            model: 模型
+            epoch: 当前轮数
+            fold: 当前折数
+        """
         current_f1 = val_metrics['f1']
         
-        # 如果还没达到最小训练轮数，直接更新最佳值
-        if epoch < self.min_epochs:
-            if val_loss < self.best_loss:
-                self.best_loss = val_loss
-                self.best_f1 = current_f1
-                self.best_model = copy.deepcopy(model.state_dict())
-                self.best_epoch = epoch
-                self.best_metrics = val_metrics
-                self._save_model(model, epoch, val_metrics, fold)
-            return False
+        if self.best_loss is None:  # 首次调用
+            self.best_loss = val_loss
+            self.best_f1 = current_f1
+            self.best_model = copy.deepcopy(model.state_dict())
+            self.best_epoch = epoch
+            self.best_metrics = val_metrics
+            self._save_model(model, epoch, val_metrics, fold)
+            return
         
-        # 检查是否有显著改善
+        # 同时考虑损失和F1分数的改善
         loss_improved = val_loss < (self.best_loss - self.min_delta)
         f1_improved = current_f1 > (self.best_f1 + self.min_delta)
         
         if loss_improved or f1_improved:
+            # 如果任一指标有显著改善
             if loss_improved:
                 self.best_loss = val_loss
             if f1_improved:
@@ -260,10 +352,16 @@ class EarlyStopping:
         if self.no_improvement_epochs >= self.patience:
             self.early_stop = True
             
-        return self.early_stop
-            
     def _save_model(self, model, epoch, metrics, fold=None):
-        """保存模型和相关信息"""
+        """
+        保存模型和相关信息
+        
+        Args:
+            model: 模型
+            epoch: 当前轮数
+            metrics: 评估指标
+            fold: 当前折数
+        """
         fold_str = f'_fold{fold}' if fold is not None else ''
         model_path = os.path.join(self.save_dir, f'best_model{fold_str}.pth')
         
@@ -285,6 +383,20 @@ class EarlyStopping:
                 f.write(f'{metric_name}: {metric_value:.4f}\n')
 
 def train_epoch(model, train_loader, criterion, optimizer, device):
+    """
+    训练一个epoch
+    
+    Args:
+        model: 模型
+        train_loader: 训练数据加载器
+        criterion: 损失函数
+        optimizer: 优化器
+        device: 设备(CPU/GPU)
+        
+    Returns:
+        epoch_loss: 平均训练损失
+        metrics: 训练指标
+    """
     model.train()
     running_loss = 0.0
     predictions = []
@@ -298,7 +410,7 @@ def train_epoch(model, train_loader, criterion, optimizer, device):
         loss = criterion(outputs, labels)
         loss.backward()
         
-        # 梯度裁剪
+        # 梯度裁剪，防止梯度爆炸
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
         
         optimizer.step()
@@ -313,6 +425,19 @@ def train_epoch(model, train_loader, criterion, optimizer, device):
     return epoch_loss, metrics
 
 def validate(model, val_loader, criterion, device):
+    """
+    验证模型
+    
+    Args:
+        model: 模型
+        val_loader: 验证数据加载器
+        criterion: 损失函数
+        device: 设备(CPU/GPU)
+        
+    Returns:
+        epoch_loss: 平均验证损失
+        metrics: 验证指标
+    """
     model.eval()
     running_loss = 0.0
     predictions = []
@@ -334,6 +459,16 @@ def validate(model, val_loader, criterion, device):
     return epoch_loss, metrics
 
 def calculate_metrics(y_true, y_pred):
+    """
+    计算评估指标
+    
+    Args:
+        y_true: 真实标签
+        y_pred: 预测标签
+        
+    Returns:
+        dict: 包含各项评估指标的字典
+    """
     return {
         'accuracy': accuracy_score(y_true, y_pred),
         'precision': precision_score(y_true, y_pred, average='macro', zero_division=0),
@@ -342,8 +477,17 @@ def calculate_metrics(y_true, y_pred):
     }
 
 def plot_learning_curves(train_losses, val_losses, metrics_history):
+    """
+    绘制学习曲线
+    
+    Args:
+        train_losses: 训练损失历史
+        val_losses: 验证损失历史
+        metrics_history: 评估指标历史
+    """
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
     
+    # 绘制损失曲线
     ax1.plot(train_losses, label='Training Loss')
     ax1.plot(val_losses, label='Validation Loss')
     ax1.set_title('Learning Curves')
@@ -351,6 +495,7 @@ def plot_learning_curves(train_losses, val_losses, metrics_history):
     ax1.set_ylabel('Loss')
     ax1.legend()
     
+    # 绘制评估指标曲线
     for metric in ['accuracy', 'precision', 'recall', 'f1']:
         values = [metrics[metric] for metrics in metrics_history]
         ax2.plot(values, label=metric)
@@ -363,7 +508,14 @@ def plot_learning_curves(train_losses, val_losses, metrics_history):
     plt.show()
 
 def save_final_model(model, fold_results, save_dir='models'):
-    """保存最终的模型和综合结果"""
+    """
+    保存最终模型和综合结果
+    
+    Args:
+        model: 模型
+        fold_results: 各折的结果
+        save_dir: 保存目录
+    """
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
         
@@ -388,7 +540,16 @@ def save_final_model(model, fold_results, save_dir='models'):
             f.write('\n')
 
 def load_model(model_path, model=None):
-    """加载保存的模型"""
+    """
+    加载保存的模型
+    
+    Args:
+        model_path: 模型文件路径
+        model: 模型实例（可选）
+        
+    Returns:
+        model: 加载的模型
+    """
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"No model found at {model_path}")
         
@@ -404,50 +565,72 @@ def load_model(model_path, model=None):
         
     return model
 
-def train_with_cross_validation(data_dir='data', n_folds=2, n_epochs=150, batch_size=16, device='cuda'):
+def train_with_cross_validation(data_dir='data', n_folds=6, n_epochs=150, batch_size=16, device='cuda'):
+    """
+    使用交叉验证训练模型
+    
+    Args:
+        data_dir: 数据目录
+        n_folds: 交叉验证折数
+        n_epochs: 训练轮数
+        batch_size: 批次大小
+        device: 设备(CPU/GPU)
+        
+    Returns:
+        fold_results: 各折的结果
+        avg_metrics: 平均评估指标
+        std_metrics: 评估指标标准差
+    """
+    # 加载数据
     X, y = load_data(data_dir)
     
+    # 创建K折交叉验证
     kfold = KFold(n_splits=n_folds, shuffle=True, random_state=42)
     fold_results = []
     
     # 创建最终模型（用于保存最后一个fold的状态）
     final_model = ResNet1D(BasicBlock1D, [1, 1, 1, 1]).to(device)
     
+    # 开始K折交叉验证
     for fold, (train_idx, val_idx) in enumerate(kfold.split(X)):
         print(f"\nFold {fold+1}/{n_folds}")
         
+        # 准备数据
         X_train, X_val = X[train_idx], X[val_idx]
         y_train, y_val = y[train_idx], y[val_idx]
         
+        # 创建数据集和数据加载器
         train_dataset = ChromatographyDataset(X_train, y_train, augment=True)
         val_dataset = ChromatographyDataset(X_val, y_val, augment=False)
         
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=batch_size)
         
+        # 初始化模型、损失函数和优化器
         model = ResNet1D(BasicBlock1D, [1, 1, 1, 1], dropout_rate=0.1).to(device)
         criterion = nn.CrossEntropyLoss()
-        optimizer = optim.AdamW(model.parameters(), lr=0.0005, weight_decay=0.0001)  # 降低初始学习率
+        optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.0001)
         
-        # 使用OneCycleLR调度器，调整参数
+        # 使用OneCycleLR调度器
         steps_per_epoch = len(train_loader)
         scheduler = OneCycleLR(
             optimizer,
             max_lr=0.001,
             epochs=n_epochs,
             steps_per_epoch=steps_per_epoch,
-            pct_start=0.4,  # 增加预热阶段
-            anneal_strategy='cos',
-            div_factor=25.0,  # 初始学习率将是max_lr/25.0
-            final_div_factor=1000.0  # 最终学习率将是初始学习率/1000.0
+            pct_start=0.3,
+            anneal_strategy='cos'
         )
         
-        early_stopping = EarlyStopping(patience=15, min_delta=0.0005, min_epochs=10)
+        # 初始化早停器
+        early_stopping = EarlyStopping(patience=10, min_delta=0.001)
         
+        # 记录训练过程
         train_losses = []
         val_losses = []
         metrics_history = []
         
+        # 开始训练
         for epoch in range(n_epochs):
             train_loss, train_metrics = train_epoch(model, train_loader, criterion, optimizer, device)
             val_loss, val_metrics = validate(model, val_loader, criterion, device)
@@ -462,12 +645,15 @@ def train_with_cross_validation(data_dir='data', n_folds=2, n_epochs=150, batch_
             print(f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
             print(f"Validation Metrics: {val_metrics}")
             
-            if early_stopping(val_loss, val_metrics, model, epoch, fold):
+            # 检查早停
+            early_stopping(val_loss, val_metrics, model, epoch, fold)
+            if early_stopping.early_stop:
                 print(f"Early stopping triggered at epoch {epoch+1}")
                 print(f"Best epoch was {early_stopping.best_epoch+1} with metrics: {early_stopping.best_metrics}")
                 model.load_state_dict(early_stopping.best_model)
                 break
         
+        # 记录本折结果
         fold_results.append({
             'final_val_metrics': early_stopping.best_metrics,
             'best_val_loss': early_stopping.best_loss,
@@ -478,11 +664,13 @@ def train_with_cross_validation(data_dir='data', n_folds=2, n_epochs=150, batch_
         if fold == n_folds - 1:
             final_model.load_state_dict(model.state_dict())
         
+        # 绘制学习曲线
         plot_learning_curves(train_losses, val_losses, metrics_history)
     
     # 保存最终模型和结果
     save_final_model(final_model, fold_results)
     
+    # 计算平均指标和标准差
     avg_metrics = {
         metric: np.mean([fold['final_val_metrics'][metric] for fold in fold_results])
         for metric in ['accuracy', 'precision', 'recall', 'f1']
@@ -492,6 +680,7 @@ def train_with_cross_validation(data_dir='data', n_folds=2, n_epochs=150, batch_
         for metric in ['accuracy', 'precision', 'recall', 'f1']
     }
     
+    # 打印最终结果
     print("\nCross-Validation Results:")
     for metric in avg_metrics:
         print(f"{metric}: {avg_metrics[metric]:.4f} ± {std_metrics[metric]:.4f}")
@@ -499,5 +688,7 @@ def train_with_cross_validation(data_dir='data', n_folds=2, n_epochs=150, batch_
     return fold_results, avg_metrics, std_metrics
 
 if __name__ == "__main__":
+    # 设置设备（GPU/CPU）
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # 开始训练
     results = train_with_cross_validation(device=device)
