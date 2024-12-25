@@ -25,6 +25,8 @@ def load_data(data_dir: str) -> Tuple[np.ndarray, np.ndarray]:
         X: 形状为(N, 1, sequence_length)的特征数据
         y: 形状为(N,)的标签数据
     """
+    print(f"Loading data from directory: {data_dir}")
+    
     class_to_label = {
         'APCK': 0,
         'FRCK': 1,
@@ -38,9 +40,12 @@ def load_data(data_dir: str) -> Tuple[np.ndarray, np.ndarray]:
     # 收集所有特征用于标准化
     all_raw_features = []
     
-    # 第一次遍历：收集所有特征
+    # 第一次遍历：收集所有特征和确定最大长度
+    print("Starting first pass to collect features...")
+    max_length = 0
     for filename in os.listdir(data_dir):
-        if not filename.endswith('.CSV'):
+        print(f"Checking file: {filename}")
+        if not filename.endswith('.csv') and not filename.endswith('.CSV'):
             continue
             
         class_name = filename[:4]
@@ -50,15 +55,21 @@ def load_data(data_dir: str) -> Tuple[np.ndarray, np.ndarray]:
         filepath = os.path.join(data_dir, filename)
         df = pd.read_csv(filepath, skiprows=1)
         features = df['Y(Counts)'].values
+        max_length = max(max_length, len(features))
         all_raw_features.append(features)
+    
+    print(f"Maximum feature length: {max_length}")
     
     # 创建并拟合标准化器
     scaler = StandardScaler()
     scaler.fit(np.concatenate(all_raw_features).reshape(-1, 1))
     
     # 第二次遍历：处理数据
+    print("\nStarting second pass to process data...")
+    processed_files = 0
     for filename in os.listdir(data_dir):
-        if not filename.endswith('.CSV'):
+        print(f"Processing file: {filename}")
+        if not filename.endswith('.csv') and not filename.endswith('.CSV'):
             continue
             
         class_name = filename[:4]
@@ -69,18 +80,34 @@ def load_data(data_dir: str) -> Tuple[np.ndarray, np.ndarray]:
         df = pd.read_csv(filepath, skiprows=1)
         
         # 使用Savitzky-Golay滤波进行平滑处理
-        features = savgol_filter(df['Y(Counts)'].values, window_length=11, polyorder=3)
+        features = savgol_filter(df['Y(Counts)'].values, window_length=9, polyorder=5)
         
         # 标准化
         features = scaler.transform(features.reshape(-1, 1)).ravel()
         
+        # 填充或截断特征到统一长度
+        if len(features) < max_length:
+            # 使用0填充
+            padded_features = np.zeros(max_length)
+            padded_features[:len(features)] = features
+            features = padded_features
+        elif len(features) > max_length:
+            # 截断到最大长度
+            features = features[:max_length]
+            
         all_features.append(features)
         all_labels.append(class_to_label[class_name])
+        processed_files += 1
+    
+    print(f"\nTotal processed files: {processed_files}")
+    if processed_files == 0:
+        raise ValueError(f"No valid CSV files found in {data_dir}")
     
     X = np.array(all_features)
     y = np.array(all_labels)
     
-    X = X[:, np.newaxis, :]
+    # 将X从(N, sequence_length)转换为(N, 1, sequence_length)的3D张量
+    X = np.expand_dims(X, axis=1)
     
     return X, y
 
@@ -404,7 +431,7 @@ def load_model(model_path, model=None):
         
     return model
 
-def train_with_cross_validation(data_dir='data', n_folds=2, n_epochs=150, batch_size=16, device='cuda'):
+def train_with_cross_validation(data_dir='data_LC_positive', n_folds=2, n_epochs=150, batch_size=16, device='cuda'):
     X, y = load_data(data_dir)
     
     kfold = KFold(n_splits=n_folds, shuffle=True, random_state=42)

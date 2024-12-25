@@ -2,3 +2,6 @@
 /models/
 /__pycache__/
 /项目结果/
+/PlotNeuralNet/
+/data_LC_negative/
+/data_LC_positive/
