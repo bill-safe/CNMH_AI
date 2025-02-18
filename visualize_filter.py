@@ -23,7 +23,7 @@ def plot_filter_comparison(file_paths):
             raw_data = df['Y(Counts)'].values
             
             # 应用Savitzky-Golay滤波
-            filtered_data = savgol_filter(raw_data, window_length=9, polyorder=5)
+            filtered_data = savgol_filter(raw_data, window_length=12, polyorder=5)
             
             # 创建x轴数据点
             x = range(len(raw_data))
@@ -43,14 +43,14 @@ def plot_filter_comparison(file_paths):
             print(f"Error processing {file_path}: {str(e)}")
     
     # 添加总标题
-    plt.suptitle('Savitzky-Golay Filter Comparison\nWindow Length=9, Polyorder=5', 
+    plt.suptitle('Savitzky-Golay Filter Comparison\nWindow Length=12, Polyorder=5', 
                  fontsize=16, y=1.02)
     
     # 调整布局并保存
     plt.tight_layout()
     
     # 保存到visualization_results目录
-    output_path = os.path.join('visualization_results', 'filter_comparison.png')
+    output_path = os.path.join('visualization_results', 'data_LC_positive_Window Length=12, Polyorder=5.png')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
 
@@ -61,10 +61,10 @@ def main():
     
     # 选择多个示例文件进行对比
     example_files = [
-        'data_LC_negative/APCK1.csv',  
-        'data_LC_negative/FRCK1.csv',  
-        'data_LC_negative/RACK1.csv',  
-        'data_LC_negative/RHCK1.csv'   
+        'data_LC_positive/APCK1.csv',  
+        'data_LC_positive/FRCK1.csv',  
+        'data_LC_positive/RACK1.csv',  
+        'data_LC_positive/RHCK1.csv'   
     ]
     
     # 进行可视化对比
