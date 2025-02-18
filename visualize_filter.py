@@ -61,10 +61,10 @@ def main():
     
     # 选择多个示例文件进行对比
     example_files = [
-        'data_LC_positive/APCK1.csv',  
-        'data_LC_positive/FRCK1.csv',  
-        'data_LC_positive/RACK1.csv',  
-        'data_LC_positive/RHCK1.csv'   
+        'data_LC_negative/APCK1.csv',  
+        'data_LC_negative/FRCK1.csv',  
+        'data_LC_negative/RACK1.csv',  
+        'data_LC_negative/RHCK1.csv'   
     ]
     
     # 进行可视化对比

@@ -431,7 +431,7 @@ def load_model(model_path, model=None):
         
     return model
 
-def train_with_cross_validation(data_dir='data_LC_positive', n_folds=2, n_epochs=150, batch_size=16, device='cuda'):
+def train_with_cross_validation(data_dir='data', n_folds=2, n_epochs=150, batch_size=16, device='cuda'):
     X, y = load_data(data_dir)
     
     kfold = KFold(n_splits=n_folds, shuffle=True, random_state=42)
@@ -527,4 +527,4 @@ def train_with_cross_validation(data_dir='data_LC_positive', n_folds=2, n_epochs
 
 if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    results = train_with_cross_validation(device=device)
+    results = train_with_cross_validation(device=device,data_dir='data')
