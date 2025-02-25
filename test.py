@@ -7,7 +7,7 @@ def call_ollama_api(input_text):
         'Content-Type': 'application/json'
     }
     data = {
-        "model": "your_model_name_here",  # 替换为你的模型名称
+        "model": "deepseek-r1:8b",  # 替换为你的模型名称
         "messages": [{"role":"user", "content": input_text}],
         "stream": False
     }
